@@ -749,3 +749,110 @@ describe('userService.resendOtp()', () => {
     sinon.assert.calledWithMatch(loggerStub.error, 'Failed to resend OTP email');
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  resendOtp() — resendCount cap (new feature)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('userService.resendOtp() — resendCount cap', () => {
+  const EMAIL = 'john@example.com';
+
+  beforeEach(() => {
+    loggerStub.info  = sinon.stub();
+    loggerStub.error = sinon.stub();
+    userRepoStub.findByEmailWithOtp = sinon.stub();
+    userRepoStub.updateById         = sinon.stub().resolves();
+    emailStub.sendOtpEmail          = sinon.stub().resolves();
+  });
+
+  afterEach(() => {
+    [userRepoStub.findByEmailWithOtp, userRepoStub.updateById,
+     emailStub.sendOtpEmail, loggerStub.info, loggerStub.error]
+      .forEach((s) => s && s.resetHistory && s.resetHistory());
+  });
+
+  it('should throw 429 when resendCount >= OTP_MAX_RESEND_COUNT', async () => {
+    const env = require('../../../src/config/env');
+    userRepoStub.findByEmailWithOtp.resolves(
+      makeFakeUserWithOtp({
+        lastSentAt:  new Date(Date.now() - 120_000),
+        resendCount: env.OTP_MAX_RESEND_COUNT,   // already at the cap
+      }),
+    );
+
+    try {
+      await userService.resendOtp(EMAIL);
+      expect.fail('Expected ApiError');
+    } catch (err) {
+      expect(err.statusCode).to.equal(429);
+      expect(err.message).to.include('Maximum OTP resend limit reached');
+    }
+  });
+
+  it('should NOT call sendOtpEmail or updateById when resendCount cap is hit', async () => {
+    const env = require('../../../src/config/env');
+    userRepoStub.findByEmailWithOtp.resolves(
+      makeFakeUserWithOtp({
+        lastSentAt:  new Date(Date.now() - 120_000),
+        resendCount: env.OTP_MAX_RESEND_COUNT,
+      }),
+    );
+
+    try { await userService.resendOtp(EMAIL); } catch (_) {}
+    sinon.assert.notCalled(emailStub.sendOtpEmail);
+    sinon.assert.notCalled(userRepoStub.updateById);
+  });
+
+  it('should allow resend when resendCount is exactly one below the cap', async () => {
+    const env = require('../../../src/config/env');
+    userRepoStub.findByEmailWithOtp.resolves(
+      makeFakeUserWithOtp({
+        lastSentAt:  new Date(Date.now() - 120_000),
+        resendCount: env.OTP_MAX_RESEND_COUNT - 1,
+      }),
+    );
+
+    await userService.resendOtp(EMAIL);   // should NOT throw
+    sinon.assert.calledOnce(emailStub.sendOtpEmail);
+  });
+
+  it('should increment resendCount by 1 in the updateById payload', async () => {
+    userRepoStub.findByEmailWithOtp.resolves(
+      makeFakeUserWithOtp({
+        lastSentAt:  new Date(Date.now() - 120_000),
+        resendCount: 2,
+      }),
+    );
+
+    await userService.resendOtp(EMAIL);
+
+    const payload = userRepoStub.updateById.firstCall.args[1];
+    expect(payload.emailOtp.resendCount).to.equal(3);
+  });
+
+  it('should start resendCount at 1 when user has no prior emailOtp', async () => {
+    userRepoStub.findByEmailWithOtp.resolves(
+      makeFakeUser({ emailOtp: null }),
+    );
+
+    await userService.resendOtp(EMAIL);
+
+    const payload = userRepoStub.updateById.firstCall.args[1];
+    expect(payload.emailOtp.resendCount).to.equal(1);
+  });
+
+  it('should reset attempts to 0 on each resend even if prior attempts > 0', async () => {
+    userRepoStub.findByEmailWithOtp.resolves(
+      makeFakeUserWithOtp({
+        lastSentAt:  new Date(Date.now() - 120_000),
+        resendCount: 1,
+        attempts:    4,
+      }),
+    );
+
+    await userService.resendOtp(EMAIL);
+
+    const payload = userRepoStub.updateById.firstCall.args[1];
+    expect(payload.emailOtp.attempts).to.equal(0);
+  });
+});

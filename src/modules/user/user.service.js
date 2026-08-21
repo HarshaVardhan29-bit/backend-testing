@@ -195,6 +195,14 @@ const resendOtp = async (email) => {
 
   // ── Cooldown check ─────────────────────────────────────────────────────────
   const otpData = user.emailOtp;
+
+  // ── Resend count limit ─────────────────────────────────────────────────────
+  if (otpData && otpData.resendCount >= env.OTP_MAX_RESEND_COUNT) {
+    throw ApiError.tooManyRequests(
+      `Maximum OTP resend limit reached. Please contact support.`,
+    );
+  }
+
   if (otpData && otpData.lastSentAt) {
     const cooldownMs = env.OTP_RESEND_COOLDOWN_SECONDS * 1000;
     const elapsed    = Date.now() - otpData.lastSentAt.getTime();
@@ -211,10 +219,11 @@ const resendOtp = async (email) => {
 
   await userRepo.updateById(user._id, {
     emailOtp: {
-      code:       otp,
-      expiresAt:  otpExpiresAt(),
-      attempts:   0,
-      lastSentAt: new Date(),
+      code:        otp,
+      expiresAt:   otpExpiresAt(),
+      attempts:    0,
+      lastSentAt:  new Date(),
+      resendCount: (otpData?.resendCount ?? 0) + 1,
     },
   });
 
