@@ -27,6 +27,7 @@ const env = cleanEnv(process.env, {
   OTP_EXPIRY_MINUTES: num({ default: 10 }),
   OTP_MAX_ATTEMPTS: num({ default: 5 }),
   OTP_RESEND_COOLDOWN_SECONDS: num({ default: 60 }),
+  OTP_MAX_RESEND_COUNT: num({ default: 5 }),
 
   // ── Rate Limiting ────────────────────────────────────────────────────────────
   RATE_LIMIT_WINDOW_MS: num({ default: 900000 }),

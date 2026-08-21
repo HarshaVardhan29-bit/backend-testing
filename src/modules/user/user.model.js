@@ -21,6 +21,10 @@ const emailOtpSchema = new mongoose.Schema(
     lastSentAt: {
       type: Date,
     },
+    resendCount: {
+      type: Number,
+      default: 0,   // Incremented each time a new OTP is sent (resend)
+    },
   },
   { _id: false },
 );
